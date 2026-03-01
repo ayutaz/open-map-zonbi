@@ -1,0 +1,1888 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ゾンビ感染シミュレーション</title>
+
+<!-- ========================================
+     Leaflet CSS: unpkg (プライマリ, SRI付き)
+     読み込み失敗時はjsDelivrにフォールバック
+     ======================================== -->
+<link
+  id="leaflet-css-primary"
+  rel="stylesheet"
+  href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+  integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
+  crossorigin=""
+  onerror="loadFallbackCSS()"
+/>
+<script>
+  /**
+   * Leaflet CSSフォールバック
+   * unpkgからの読み込みが失敗した場合にjsDelivrから再読み込みする
+   */
+  function loadFallbackCSS() {
+    console.warn('[CDN] unpkg CSS読み込み失敗。jsDelivrにフォールバック');
+    var primary = document.getElementById('leaflet-css-primary');
+    if (primary) primary.remove();
+    var fallback = document.createElement('link');
+    fallback.rel = 'stylesheet';
+    fallback.href = 'https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.css';
+    fallback.crossOrigin = '';
+    document.head.appendChild(fallback);
+  }
+</script>
+
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { width: 100%; height: 100%; font-family: 'Segoe UI', sans-serif; }
+  #map { width: 100%; height: 100%; }
+
+  #controls {
+    position: absolute; top: 10px; right: 10px; z-index: 1000;
+    background: rgba(20, 20, 40, 0.92); border-radius: 12px;
+    padding: 16px; min-width: 240px; backdrop-filter: blur(8px);
+    border: 1px solid rgba(255,255,255,0.1); color: #eee;
+  }
+  #controls h2 { font-size: 16px; margin-bottom: 12px; color: #e94560; }
+  .ctrl-group { margin-bottom: 10px; }
+  .ctrl-group label { display: block; font-size: 12px; margin-bottom: 4px; color: #aaa; }
+  .ctrl-group input[type="range"] { width: 100%; }
+  .ctrl-group .val { float: right; color: #fff; font-weight: bold; }
+
+  .btn {
+    padding: 8px 16px; border: none; border-radius: 6px; cursor: pointer;
+    font-size: 13px; font-weight: bold; margin-right: 4px; margin-bottom: 4px;
+    transition: all 0.2s;
+  }
+  .btn-start { background: #4ecdc4; color: #1a1a2e; }
+  .btn-start:hover { background: #45b7aa; }
+  .btn-pause { background: #ffd93d; color: #1a1a2e; }
+  .btn-reset { background: #e94560; color: #fff; }
+
+  #stats {
+    position: absolute; bottom: 10px; left: 10px; z-index: 1000;
+    background: rgba(20, 20, 40, 0.92); border-radius: 12px;
+    padding: 16px; backdrop-filter: blur(8px);
+    border: 1px solid rgba(255,255,255,0.1); color: #eee;
+  }
+  #stats .stat { display: inline-block; margin-right: 20px; }
+  .stat .num { font-size: 28px; font-weight: bold; }
+  .stat .lbl { font-size: 11px; color: #aaa; }
+  .zombie-c { color: #e94560; }
+  .human-c { color: #00d2ff; }
+  .time-c { color: #ffd93d; }
+
+  #instruction {
+    position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+    z-index: 1000; background: rgba(20, 20, 40, 0.95); border-radius: 16px;
+    padding: 32px; text-align: center; backdrop-filter: blur(8px);
+    border: 1px solid rgba(255,255,255,0.15); color: #eee;
+  }
+  #instruction h1 { color: #e94560; margin-bottom: 12px; font-size: 22px; }
+  #instruction p { color: #ccc; font-size: 14px; line-height: 1.6; }
+  .hidden { display: none !important; }
+
+  #loading {
+    position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+    z-index: 1001; background: rgba(20, 20, 40, 0.95); border-radius: 16px;
+    padding: 32px; text-align: center; color: #eee;
+  }
+  #loading .spinner {
+    width: 40px; height: 40px; border: 4px solid rgba(255,255,255,0.2);
+    border-top-color: #e94560; border-radius: 50%; margin: 0 auto 16px;
+    animation: spin 0.8s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  #result {
+    position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+    z-index: 1000; background: rgba(20, 20, 40, 0.95); border-radius: 16px;
+    padding: 32px; text-align: center; backdrop-filter: blur(8px);
+    border: 1px solid rgba(255,255,255,0.15); color: #eee;
+  }
+  #result h2 { color: #e94560; margin-bottom: 16px; font-size: 20px; }
+  #result p { color: #ccc; font-size: 14px; margin-bottom: 8px; }
+
+  /* 比率バー */
+  #ratioBarContainer {
+    margin-top: 12px; width: 100%; height: 8px;
+    background: rgba(255,255,255,0.1); border-radius: 4px; overflow: hidden;
+  }
+  #ratioBarHuman {
+    height: 100%; width: 100%; border-radius: 4px;
+    background: linear-gradient(90deg, #00d2ff, #00d2ff);
+    transition: width 0.3s ease;
+  }
+
+  /* プリセットボタン */
+  .preset-group { margin-top: 12px; border-top: 1px solid rgba(255,255,255,0.08); padding-top: 10px; }
+  .preset-group .lbl { font-size: 11px; color: #888; margin-bottom: 6px; }
+  .btn-preset {
+    padding: 5px 10px; border: 1px solid rgba(255,255,255,0.15); border-radius: 5px;
+    cursor: pointer; font-size: 11px; color: #ddd; margin-right: 4px; margin-bottom: 4px;
+    background: rgba(255,255,255,0.06); transition: all 0.2s;
+  }
+  .btn-preset:hover { background: rgba(255,255,255,0.14); border-color: #e94560; }
+
+  /* 人口推移ミニグラフ */
+  #miniGraph {
+    display: block;
+    border-radius: 4px;
+    margin-top: 8px;
+    background: rgba(0,0,0,0.3);
+  }
+  #resultGraph {
+    display: block;
+    border-radius: 4px;
+    margin: 12px auto 0;
+    background: rgba(0,0,0,0.3);
+  }
+
+  /* --- 終了演出: フラッシュオーバーレイ --- */
+  #flash {
+    position: fixed; inset: 0; z-index: 1002;
+    background: rgba(233, 69, 96, 0.4);
+    pointer-events: none; opacity: 0;
+  }
+  #flash.active {
+    animation: flashPulse 1s ease-out forwards;
+  }
+  @keyframes flashPulse {
+    0%   { opacity: 0; }
+    30%  { opacity: 1; }
+    100% { opacity: 0; }
+  }
+
+  /* --- 終了演出: リザルトフェードイン --- */
+  #result.fade-in {
+    animation: fadeIn 0.5s ease-out forwards;
+  }
+  @keyframes fadeIn {
+    from { opacity: 0; transform: translate(-50%, -50%) scale(0.9); }
+    to   { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+  }
+
+  /* --- ラストサバイバー: 人数少数時の点滅 --- */
+  .blink-warning {
+    animation: blinkText 0.6s ease-in-out infinite alternate;
+  }
+  @keyframes blinkText {
+    from { color: #00d2ff; }
+    to   { color: #ffffff; }
+  }
+
+  /* --- prefers-reduced-motion: アニメーション無効化 --- */
+  @media (prefers-reduced-motion: reduce) {
+    #flash.active { animation: none; opacity: 0; }
+    #result.fade-in { animation: none; opacity: 1; }
+    .blink-warning { animation: none; color: #ffffff; }
+  }
+</style>
+</head>
+<body>
+<div id="flash"></div>
+<div id="map"></div>
+
+<div id="instruction">
+  <h1>ZOMBIE OUTBREAK</h1>
+  <p>マップ上をクリックして<br>シミュレーションエリアを選択してください</p>
+  <p style="font-size:12px; margin-top:8px; color:#888;">クリックした地点の周辺道路を取得します</p>
+</div>
+
+<div id="loading" class="hidden">
+  <div class="spinner"></div>
+  <p>道路データを取得中...</p>
+</div>
+
+<div id="controls" class="hidden">
+  <h2>ZOMBIE OUTBREAK</h2>
+  <div class="ctrl-group">
+    <label>人間の数 <span class="val" id="humanCountVal">50</span></label>
+    <input type="range" id="humanCount" min="10" max="200" step="10" value="50">
+  </div>
+  <div class="ctrl-group">
+    <label>ゾンビの数 <span class="val" id="zombieCountVal">3</span></label>
+    <input type="range" id="zombieCount" min="1" max="20" value="3">
+  </div>
+  <div class="ctrl-group">
+    <label>速度倍率 <span class="val" id="speedVal">1.0</span></label>
+    <input type="range" id="speed" min="0.5" max="5" step="0.5" value="1">
+  </div>
+  <div class="preset-group">
+    <div class="lbl">プリセット</div>
+    <button class="btn-preset" data-human="100" data-zombie="1">パニック映画</button>
+    <button class="btn-preset" data-human="50" data-zombie="10">アウトブレイク</button>
+    <button class="btn-preset" data-human="30" data-zombie="20">絶望</button>
+  </div>
+  <div style="margin-top: 14px;">
+    <button class="btn btn-start" id="btnStart">開始</button>
+    <button class="btn btn-pause hidden" id="btnPause">一時停止</button>
+    <button class="btn btn-reset hidden" id="btnReset">リセット</button>
+  </div>
+</div>
+
+<div id="stats" class="hidden">
+  <div class="stat"><div class="num human-c" id="humanStat">0</div><div class="lbl">人間</div></div>
+  <div class="stat"><div class="num zombie-c" id="zombieStat">0</div><div class="lbl">ゾンビ</div></div>
+  <div class="stat"><div class="num time-c" id="timeStat">0:00</div><div class="lbl">経過時間</div></div>
+  <div id="ratioBarContainer"><div id="ratioBarHuman"></div></div>
+  <canvas id="miniGraph" width="200" height="60"></canvas>
+</div>
+
+<div id="result" class="hidden">
+  <h2>全人間がゾンビ化しました</h2>
+  <p id="resultTime"></p>
+  <p id="resultCount"></p>
+  <canvas id="resultGraph" width="300" height="120"></canvas>
+  <div style="margin-top:16px;">
+    <button class="btn btn-start" id="btnRetry">もう一度</button>
+    <button class="btn btn-reset" id="btnNewArea">エリアを変える</button>
+  </div>
+</div>
+
+<!-- ========================================
+     Leaflet JS: unpkg (プライマリ, SRI付き)
+     読み込み失敗時はjsDelivrにフォールバック
+     ======================================== -->
+<script
+  id="leaflet-js-primary"
+  src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+  integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
+  crossorigin=""
+  onerror="loadFallbackJS()"
+></script>
+<script>
+  /**
+   * Leaflet JSフォールバック
+   * unpkgからの読み込みが失敗した場合にjsDelivrから再読み込みする
+   * Promiseを返すことで、後続スクリプトが待機可能
+   */
+  var _leafletFallbackPromise = null;
+  function loadFallbackJS() {
+    console.warn('[CDN] unpkg JS読み込み失敗。jsDelivrにフォールバック');
+    _leafletFallbackPromise = new Promise(function(resolve, reject) {
+      var script = document.createElement('script');
+      script.src = 'https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.js';
+      script.crossOrigin = '';
+      script.onload = function() {
+        console.info('[CDN] jsDelivrからLeaflet JS読み込み成功');
+        resolve();
+      };
+      script.onerror = function() {
+        console.error('[CDN] 全CDNからのLeaflet JS読み込みに失敗');
+        reject(new Error('Leaflet JSの読み込みに失敗しました'));
+      };
+      document.body.appendChild(script);
+    });
+  }
+</script>
+
+<!-- ========================================
+     Overpass APIクライアント（IIFEモジュール）
+     ======================================== -->
+<script>
+/**
+ * Overpass APIクライアント
+ *
+ * 機能:
+ * - 複数エンドポイントのフォールバック（overpass-api.de → kumi.systems）
+ * - 指数バックオフ + ジッター付きリトライ（各エンドポイント最大2回）
+ * - HTTPステータス別エラーハンドリング（429/504→リトライ、400→即エラー）
+ * - デバウンスによる連続クリック防止（1秒間隔）
+ * - AbortControllerによる30秒タイムアウト
+ */
+const OverpassAPI = (() => {
+  'use strict';
+
+  // --- 定数定義 ---
+
+  /** Overpass APIエンドポイント一覧（優先順） */
+  const ENDPOINTS = [
+    'https://overpass-api.de/api/interpreter',
+    'https://overpass.kumi.systems/api/interpreter',
+  ];
+
+  /** 各エンドポイントでの最大リトライ回数 */
+  const MAX_RETRIES = 2;
+
+  /** リクエストタイムアウト（ミリ秒） */
+  const TIMEOUT_MS = 30000;
+
+  /** デバウンス間隔（ミリ秒） */
+  const DEBOUNCE_INTERVAL_MS = 1000;
+
+  /** リトライ時のバックオフ設定（リトライ回数ごと） */
+  const RETRY_CONFIG = [
+    { baseMs: 1000, jitterMs: 500 },   // 1回目リトライ: 1秒 + ランダム0〜500ms
+    { baseMs: 2000, jitterMs: 1000 },   // 2回目リトライ: 2秒 + ランダム0〜1000ms
+  ];
+
+  /** リトライ対象のHTTPステータスコード */
+  const RETRYABLE_STATUS = new Set([429, 504]);
+
+  /** リトライせず即エラーとするHTTPステータスコード */
+  const NON_RETRYABLE_STATUS = new Set([400]);
+
+  /** bbox計算の緯度オフセット */
+  const BBOX_OFFSET_LAT = 0.008;
+
+  /** bbox計算の経度オフセット */
+  const BBOX_OFFSET_LNG = 0.008;
+
+  /** 取得対象のhighwayタグ一覧 */
+  const HIGHWAY_TYPES = [
+    'residential', 'tertiary', 'secondary', 'primary', 'trunk',
+    'unclassified', 'living_street', 'pedestrian', 'footway',
+    'path', 'service',
+  ];
+
+  // --- 内部状態 ---
+
+  /** 最後のリクエスト時刻（デバウンス制御用） */
+  let _lastRequestTime = 0;
+
+  // --- ユーティリティ関数 ---
+
+  /**
+   * 指定ミリ秒待機するPromiseを返す
+   * @param {number} ms - 待機時間（ミリ秒）
+   * @returns {Promise<void>}
+   */
+  function sleep(ms) {
+    return new Promise(resolve => setTimeout(resolve, ms));
+  }
+
+  /**
+   * 指数バックオフ + ジッターの待機時間を計算
+   * @param {number} retryIndex - リトライ回数（0始まり）
+   * @returns {number} 待機時間（ミリ秒）
+   */
+  function calcBackoffMs(retryIndex) {
+    const config = RETRY_CONFIG[retryIndex];
+    if (!config) return 0;
+    return config.baseMs + Math.random() * config.jitterMs;
+  }
+
+  /**
+   * Overpass QLクエリを生成する
+   * 指定座標を中心としたbbox内の道路データを取得するクエリ
+   * @param {number} lat - 中心緯度
+   * @param {number} lng - 中心経度
+   * @returns {string} Overpass QLクエリ文字列
+   */
+  function buildQuery(lat, lng) {
+    const south = lat - BBOX_OFFSET_LAT;
+    const north = lat + BBOX_OFFSET_LAT;
+    const west  = lng - BBOX_OFFSET_LNG;
+    const east  = lng + BBOX_OFFSET_LNG;
+
+    // highwayタグの正規表現フィルタ（対象タグをOR結合）
+    const highwayRegex = HIGHWAY_TYPES.join('|');
+
+    return `[out:json][timeout:25];(way["highway"~"^(${highwayRegex})$"](${south},${west},${north},${east}););out body;>;out skel qt;`;
+  }
+
+  /**
+   * 単一エンドポイントに対してリトライ付きfetchを実行する
+   *
+   * リトライ可能なHTTPステータス（429, 504）は指数バックオフ後に再試行する。
+   * HTTP 400はリトライせず即座にエラーをスローする。
+   * ネットワークエラー（DNS解決失敗、接続拒否等）はリトライせず、
+   * 呼び出し元が次のエンドポイントへフォールバックする。
+   *
+   * @param {string} endpoint - APIエンドポイントURL
+   * @param {string} query - Overpass QLクエリ
+   * @returns {Promise<Object[]>} elements配列
+   * @throws {Error} リトライ不可エラーまたは全リトライ失敗時
+   */
+  async function fetchWithRetry(endpoint, query) {
+    let lastError = null;
+
+    for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+      // リトライ時はバックオフ待機
+      if (attempt > 0) {
+        const waitMs = calcBackoffMs(attempt - 1);
+        console.info(
+          `[Overpass] リトライ ${attempt}/${MAX_RETRIES} ` +
+          `(${endpoint}) 待機: ${Math.round(waitMs)}ms`
+        );
+        await sleep(waitMs);
+      }
+
+      // AbortControllerでタイムアウト制御
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), TIMEOUT_MS);
+
+      try {
+        const response = await fetch(endpoint, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+          body: 'data=' + encodeURIComponent(query),
+          signal: controller.signal,
+        });
+
+        clearTimeout(timeoutId);
+
+        // 成功レスポンス
+        if (response.ok) {
+          const data = await response.json();
+          return data.elements || [];
+        }
+
+        // HTTP 400: クエリ構文エラー等。リトライしても直らないので即エラー
+        if (NON_RETRYABLE_STATUS.has(response.status)) {
+          const errorText = await response.text().catch(() => '');
+          throw new Error(
+            `[Overpass] HTTP ${response.status}: リクエストエラー。` +
+            `クエリを確認してください。${errorText ? ' ' + errorText : ''}`
+          );
+        }
+
+        // HTTP 429（レート制限）/ 504（タイムアウト）: リトライ対象
+        if (RETRYABLE_STATUS.has(response.status)) {
+          lastError = new Error(
+            `[Overpass] HTTP ${response.status} (${endpoint})`
+          );
+          console.warn(lastError.message);
+          continue;
+        }
+
+        // その他の予期しないHTTPエラー: リトライを試みる
+        lastError = new Error(
+          `[Overpass] HTTP ${response.status}: 予期しないエラー (${endpoint})`
+        );
+        console.warn(lastError.message);
+        continue;
+
+      } catch (err) {
+        clearTimeout(timeoutId);
+
+        // HTTP 400由来のエラーはリトライ不可。そのままスロー
+        if (err.message && err.message.includes('[Overpass] HTTP 400')) {
+          throw err;
+        }
+
+        // AbortError: タイムアウトによるリクエスト中断
+        if (err.name === 'AbortError') {
+          lastError = new Error(
+            `[Overpass] タイムアウト (${TIMEOUT_MS}ms超過, ${endpoint})`
+          );
+          console.warn(lastError.message);
+          continue; // タイムアウトはリトライ対象
+        }
+
+        // ネットワークエラー（接続不可等）: リトライせず次のエンドポイントへ
+        lastError = new Error(
+          `[Overpass] ネットワークエラー (${endpoint}): ${err.message}`
+        );
+        console.warn(lastError.message);
+        throw lastError;
+      }
+    }
+
+    // 全リトライ回数を消費
+    throw lastError || new Error(`[Overpass] 全リトライ失敗 (${endpoint})`);
+  }
+
+  // --- 公開API ---
+
+  /**
+   * 指定座標周辺の道路データを取得する
+   *
+   * 処理フロー:
+   * 1. デバウンスチェック（前回リクエストから1秒以内は拒否）
+   * 2. Overpass QLクエリを生成（bbox: lat/lng ±0.008）
+   * 3. 各エンドポイントを優先順に試行
+   *    - 各エンドポイントで最大2回リトライ（指数バックオフ+ジッター）
+   *    - ネットワークエラー時は次のエンドポイントへフォールバック
+   * 4. 全エンドポイント失敗時はエラーをスロー
+   *
+   * @param {number} lat - 緯度
+   * @param {number} lng - 経度
+   * @returns {Promise<Object[]>} Overpass APIのelements配列
+   * @throws {Error} デバウンス拒否、HTTP 400、全エンドポイント失敗時
+   */
+  async function fetchRoads(lat, lng) {
+    // デバウンス: 連続クリック防止
+    const now = Date.now();
+    if (now - _lastRequestTime < DEBOUNCE_INTERVAL_MS) {
+      console.warn('[Overpass] デバウンス: リクエスト間隔が短すぎます');
+      throw new Error('リクエスト間隔が短すぎます。1秒以上間隔を空けてください。');
+    }
+    _lastRequestTime = now;
+
+    const query = buildQuery(lat, lng);
+    console.info(`[Overpass] クエリ実行: lat=${lat}, lng=${lng}`);
+
+    /** 各エンドポイントのエラーを記録 */
+    const errors = [];
+
+    // エンドポイントを順に試行
+    for (let i = 0; i < ENDPOINTS.length; i++) {
+      const endpoint = ENDPOINTS[i];
+      console.info(
+        `[Overpass] エンドポイント ${i + 1}/${ENDPOINTS.length}: ${endpoint}`
+      );
+
+      try {
+        const elements = await fetchWithRetry(endpoint, query);
+        console.info(
+          `[Overpass] 取得成功: ${elements.length}件の要素 (${endpoint})`
+        );
+        return elements;
+      } catch (err) {
+        console.warn(
+          `[Overpass] エンドポイント失敗 (${endpoint}): ${err.message}`
+        );
+        errors.push({ endpoint, error: err });
+
+        // HTTP 400はクエリ自体の問題。他のエンドポイントでも失敗するので即終了
+        if (err.message && err.message.includes('HTTP 400')) {
+          throw err;
+        }
+
+        // 次のエンドポイントへフォールバック
+        continue;
+      }
+    }
+
+    // 全エンドポイント失敗: ユーザー向けエラーメッセージを生成
+    const errorSummary = errors
+      .map(e => `  - ${e.endpoint}: ${e.error.message}`)
+      .join('\n');
+    const finalError = new Error(
+      `全てのOverpass APIエンドポイントが失敗しました。\n` +
+      `インターネット接続を確認し、しばらく後に再試行してください。\n` +
+      `詳細:\n${errorSummary}`
+    );
+    console.error(finalError.message);
+    throw finalError;
+  }
+
+  // IIFEモジュールとして公開
+  return { fetchRoads };
+})();
+</script>
+
+<script>
+// ============================================================
+// ゾンビ感染シミュレーション — コアモジュール
+// IIFE形式で名前空間を汚染しない
+// ============================================================
+const ZombieSim = (function () {
+  'use strict';
+
+  // 地球の半径（メートル）
+  const R = 6_371_000;
+  // 度 → ラジアン変換係数
+  const DEG2RAD = Math.PI / 180;
+
+  // ============================================================
+  // 1. Binary Heap (Min-Heap) — PriorityQueue
+  //    Lazy Deletion方式: decreaseKey不要、重複挿入を許容し
+  //    extractMin時にclosedSetで弾く
+  // ============================================================
+  class PriorityQueue {
+    constructor() {
+      // ヒープ配列: 各要素は { id: ノードID, priority: 優先度 }
+      this._heap = [];
+    }
+
+    /** 要素数を返す（削除済み含む） */
+    get size() {
+      return this._heap.length;
+    }
+
+    /** ヒープが空かどうか */
+    get isEmpty() {
+      return this._heap.length === 0;
+    }
+
+    /**
+     * ノードを挿入する — O(log n)
+     * @param {string|number} id ノードID
+     * @param {number} priority 優先度（小さいほど高優先）
+     */
+    insert(id, priority) {
+      const heap = this._heap;
+      heap.push({ id, priority });
+      // 末尾から上方向に修正
+      this._bubbleUp(heap.length - 1);
+    }
+
+    /**
+     * 最小優先度の要素を取り出す — O(log n)
+     * @returns {{ id, priority } | null}
+     */
+    extractMin() {
+      const heap = this._heap;
+      if (heap.length === 0) return null;
+
+      const min = heap[0];
+      const last = heap.pop();
+
+      if (heap.length > 0) {
+        heap[0] = last;
+        // 先頭から下方向に修正
+        this._sinkDown(0);
+      }
+
+      return min;
+    }
+
+    /**
+     * 上方向にヒープを修正
+     * @param {number} i 修正開始インデックス
+     */
+    _bubbleUp(i) {
+      const heap = this._heap;
+      const node = heap[i];
+
+      while (i > 0) {
+        const parentIdx = (i - 1) >> 1;
+        const parent = heap[parentIdx];
+
+        if (node.priority >= parent.priority) break;
+
+        // 親を下に移動
+        heap[i] = parent;
+        i = parentIdx;
+      }
+
+      heap[i] = node;
+    }
+
+    /**
+     * 下方向にヒープを修正
+     * @param {number} i 修正開始インデックス
+     */
+    _sinkDown(i) {
+      const heap = this._heap;
+      const len = heap.length;
+      const node = heap[i];
+
+      while (true) {
+        const left = 2 * i + 1;
+        const right = 2 * i + 2;
+        let smallest = i;
+
+        if (left < len && heap[left].priority < heap[smallest].priority) {
+          smallest = left;
+        }
+        if (right < len && heap[right].priority < heap[smallest].priority) {
+          smallest = right;
+        }
+
+        if (smallest === i) break;
+
+        heap[i] = heap[smallest];
+        i = smallest;
+      }
+
+      heap[i] = node;
+    }
+  }
+
+  // ============================================================
+  // 2. グラフ構築 + 最大連結成分抽出
+  //    OSMデータから隣接リストを構築し、最大連結成分のみ残す
+  //    cosLatの事前計算もここで行う
+  // ============================================================
+
+  /**
+   * Haversine距離（メートル）
+   * エッジの重み計算に使用（正確な距離が必要なため）
+   */
+  function haversine(lat1, lon1, lat2, lon2) {
+    const dLat = (lat2 - lat1) * DEG2RAD;
+    const dLon = (lon2 - lon1) * DEG2RAD;
+    const a =
+      Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+      Math.cos(lat1 * DEG2RAD) *
+        Math.cos(lat2 * DEG2RAD) *
+        Math.sin(dLon / 2) *
+        Math.sin(dLon / 2);
+    return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  }
+
+  /**
+   * OSMデータからグラフを構築し、最大連結成分のみ返す
+   * @param {Object} osmData Overpass APIのレスポンス（JSON）
+   * @returns {{ nodes: Map, adjacency: Map }}
+   *   nodes: nodeId → { lat, lon, cosLat }
+   *   adjacency: nodeId → [{ to, dist }, ...]
+   */
+  function buildGraph(osmData) {
+    const elements = osmData.elements;
+
+    // --- ノードの収集 ---
+    const allNodes = new Map();
+    for (let i = 0; i < elements.length; i++) {
+      const el = elements[i];
+      if (el.type === 'node') {
+        allNodes.set(el.id, { lat: el.lat, lon: el.lon });
+      }
+    }
+
+    // --- 隣接リストの構築 ---
+    const adjacency = new Map();
+
+    // 隣接リスト追加用ヘルパー
+    function addEdge(fromId, toId, dist) {
+      if (!adjacency.has(fromId)) adjacency.set(fromId, []);
+      adjacency.get(fromId).push({ to: toId, dist });
+    }
+
+    for (let i = 0; i < elements.length; i++) {
+      const el = elements[i];
+      if (el.type !== 'way') continue;
+
+      const wayNodes = el.nodes;
+      for (let j = 0; j < wayNodes.length - 1; j++) {
+        const nA = wayNodes[j];
+        const nB = wayNodes[j + 1];
+        const a = allNodes.get(nA);
+        const b = allNodes.get(nB);
+
+        // ノードが存在しない場合はスキップ
+        if (!a || !b) continue;
+
+        const dist = haversine(a.lat, a.lon, b.lat, b.lon);
+
+        // 無向グラフ（双方向エッジ）
+        addEdge(nA, nB, dist);
+        addEdge(nB, nA, dist);
+      }
+    }
+
+    // --- 最大連結成分の抽出（BFS） ---
+    const visited = new Set();
+    let largestComponent = [];
+
+    // グラフに含まれるノードID一覧（隣接リストにキーとして存在するもの）
+    const graphNodeIds = Array.from(adjacency.keys());
+
+    for (let i = 0; i < graphNodeIds.length; i++) {
+      const startId = graphNodeIds[i];
+      if (visited.has(startId)) continue;
+
+      // BFSで連結成分を探索
+      const component = [];
+      const queue = [startId];
+      visited.add(startId);
+
+      while (queue.length > 0) {
+        const current = queue.shift();
+        component.push(current);
+
+        const neighbors = adjacency.get(current);
+        if (!neighbors) continue;
+
+        for (let k = 0; k < neighbors.length; k++) {
+          const neighborId = neighbors[k].to;
+          if (!visited.has(neighborId)) {
+            visited.add(neighborId);
+            queue.push(neighborId);
+          }
+        }
+      }
+
+      // 最大連結成分を保持
+      if (component.length > largestComponent.length) {
+        largestComponent = component;
+      }
+    }
+
+    // --- 最大連結成分のノードとエッジだけを残す ---
+    const componentSet = new Set(largestComponent);
+    const filteredNodes = new Map();
+    const filteredAdjacency = new Map();
+
+    for (let i = 0; i < largestComponent.length; i++) {
+      const nodeId = largestComponent[i];
+      const nodeData = allNodes.get(nodeId);
+      if (!nodeData) continue;
+
+      // cosLatを事前計算してキャッシュ（Equirectangular近似用）
+      const cosLat = Math.cos(nodeData.lat * DEG2RAD);
+      filteredNodes.set(nodeId, {
+        lat: nodeData.lat,
+        lon: nodeData.lon,
+        cosLat: cosLat,
+      });
+
+      // 隣接リストからコンポーネント内のエッジのみ残す
+      const edges = adjacency.get(nodeId);
+      if (edges) {
+        const filteredEdges = [];
+        for (let j = 0; j < edges.length; j++) {
+          if (componentSet.has(edges[j].to)) {
+            filteredEdges.push(edges[j]);
+          }
+        }
+        if (filteredEdges.length > 0) {
+          filteredAdjacency.set(nodeId, filteredEdges);
+        }
+      }
+    }
+
+    return {
+      nodes: filteredNodes,
+      adjacency: filteredAdjacency,
+    };
+  }
+
+  // ============================================================
+  // 3. A*アルゴリズム
+  //    Equirectangular近似ヒューリスティック使用
+  //    探索ノード上限3,000で無限ループ防止
+  // ============================================================
+
+  /**
+   * Equirectangular近似による距離推定（メートル）
+   * A*のヒューリスティック関数として使用
+   * Haversineより高速だが、admissible（過大評価しない）
+   * @param {Object} nodeA { lat, lon, cosLat }
+   * @param {Object} nodeB { lat, lon, cosLat }
+   * @returns {number} 推定距離（メートル）
+   */
+  function equirectDist(nodeA, nodeB) {
+    // 2点の平均cosLatを使用（より正確）
+    const cosLat = (nodeA.cosLat + nodeB.cosLat) * 0.5;
+    const dx = (nodeB.lon - nodeA.lon) * DEG2RAD * cosLat;
+    const dy = (nodeB.lat - nodeA.lat) * DEG2RAD;
+    return R * Math.sqrt(dx * dx + dy * dy);
+  }
+
+  /**
+   * A*経路探索
+   * @param {Map} adjacency 隣接リスト nodeId → [{ to, dist }]
+   * @param {Map} nodes ノード情報 nodeId → { lat, lon, cosLat }
+   * @param {number|string} startId 始点ノードID
+   * @param {number|string} goalId 終点ノードID
+   * @returns {Array} ノードIDの配列（経路）。見つからなければ空配列
+   */
+  function aStar(adjacency, nodes, startId, goalId) {
+    // 始点と終点が同じ場合
+    if (startId === goalId) return [startId];
+
+    // ノード情報が不足している場合は空経路
+    const goalNode = nodes.get(goalId);
+    if (!goalNode) return [];
+    if (!nodes.has(startId)) return [];
+
+    // 探索ノード上限
+    const MAX_EXPANSIONS = 3000;
+    let expansions = 0;
+
+    const openSet = new PriorityQueue();
+    const closedSet = new Set();
+    const gScore = new Map(); // ノードID → 始点からの実コスト
+    const cameFrom = new Map(); // ノードID → 直前のノードID
+
+    gScore.set(startId, 0);
+    const h0 = equirectDist(nodes.get(startId), goalNode);
+    openSet.insert(startId, h0);
+
+    while (!openSet.isEmpty) {
+      const { id: currentId } = openSet.extractMin();
+
+      // Lazy Deletion: closedSetに入っているノードはスキップ
+      if (closedSet.has(currentId)) continue;
+
+      // ゴール到達
+      if (currentId === goalId) {
+        return reconstructPath(cameFrom, currentId);
+      }
+
+      closedSet.add(currentId);
+      expansions++;
+
+      // 探索ノード上限チェック
+      if (expansions >= MAX_EXPANSIONS) {
+        // 上限到達: 見つからなかったとして空配列を返す
+        return [];
+      }
+
+      const neighbors = adjacency.get(currentId);
+      if (!neighbors) continue;
+
+      const currentG = gScore.get(currentId);
+
+      for (let i = 0; i < neighbors.length; i++) {
+        const { to: neighborId, dist } = neighbors[i];
+
+        // 既に確定済みのノードはスキップ
+        if (closedSet.has(neighborId)) continue;
+
+        const tentativeG = currentG + dist;
+
+        // より良い経路が見つかった場合のみ更新
+        const prevG = gScore.get(neighborId);
+        if (prevG !== undefined && tentativeG >= prevG) continue;
+
+        gScore.set(neighborId, tentativeG);
+        cameFrom.set(neighborId, currentId);
+
+        const neighborNode = nodes.get(neighborId);
+        if (!neighborNode) continue;
+
+        const f = tentativeG + equirectDist(neighborNode, goalNode);
+
+        // Lazy Deletion方式: 重複挿入を許容
+        openSet.insert(neighborId, f);
+      }
+    }
+
+    // 経路が見つからなかった
+    return [];
+  }
+
+  /**
+   * cameFromマップから経路を復元する
+   * @param {Map} cameFrom
+   * @param {number|string} currentId ゴールノードID
+   * @returns {Array} 始点→終点の順序のノードID配列
+   */
+  function reconstructPath(cameFrom, currentId) {
+    const path = [currentId];
+    while (cameFrom.has(currentId)) {
+      currentId = cameFrom.get(currentId);
+      path.push(currentId);
+    }
+    path.reverse();
+    return path;
+  }
+
+  // ============================================================
+  // 4. 人間の逃走ロジック（貪欲法）
+  //    最寄りゾンビから最も遠い隣接ノードを選択
+  // ============================================================
+
+  /**
+   * 人間の逃走先ノードを決定する（貪欲法）
+   * @param {Map} adjacency 隣接リスト
+   * @param {Map} nodes ノード情報
+   * @param {number|string} currentNodeId 人間の現在ノード
+   * @param {Object} nearestZombiePos 最寄りゾンビの位置 { lat, lon, cosLat }
+   * @returns {number|string|null} 逃走先ノードID（隣接ノードがなければnull）
+   */
+  function humanFleeTarget(adjacency, nodes, currentNodeId, nearestZombiePos) {
+    const neighbors = adjacency.get(currentNodeId);
+    if (!neighbors || neighbors.length === 0) return null;
+
+    let bestNodeId = null;
+    let bestDist = -1;
+
+    for (let i = 0; i < neighbors.length; i++) {
+      const neighborId = neighbors[i].to;
+      const neighborNode = nodes.get(neighborId);
+      if (!neighborNode) continue;
+
+      // ゾンビからの距離を計算（Equirectangular近似）
+      const dist = equirectDist(neighborNode, nearestZombiePos);
+
+      if (dist > bestDist) {
+        bestDist = dist;
+        bestNodeId = neighborId;
+      }
+    }
+
+    return bestNodeId;
+  }
+
+  /**
+   * エージェント群の中から指定位置に最も近いゾンビを探す
+   * @param {Array} agents エージェント配列
+   * @param {Object} pos 基準位置 { lat, lon, cosLat }
+   * @param {Map} nodes ノード情報
+   * @returns {Object|null} 最寄りゾンビの補間位置 { lat, lon, cosLat } またはnull
+   */
+  function findNearestZombie(agents, pos, nodes) {
+    let bestDist = Infinity;
+    let bestPos = null;
+
+    for (let i = 0; i < agents.length; i++) {
+      const agent = agents[i];
+      if (!agent.isZombie) continue;
+
+      // エージェントの補間位置を計算
+      const fromNode = nodes.get(agent.from);
+      const toNode = nodes.get(agent.to);
+      if (!fromNode || !toNode) continue;
+
+      const aLat = fromNode.lat + (toNode.lat - fromNode.lat) * agent.progress;
+      const aLon = fromNode.lon + (toNode.lon - fromNode.lon) * agent.progress;
+      const aCosLat = fromNode.cosLat + (toNode.cosLat - fromNode.cosLat) * agent.progress;
+
+      const zombiePos = { lat: aLat, lon: aLon, cosLat: aCosLat };
+      const dist = equirectDist(pos, zombiePos);
+
+      if (dist < bestDist) {
+        bestDist = dist;
+        bestPos = zombiePos;
+      }
+    }
+
+    return bestPos;
+  }
+
+  // ============================================================
+  // 5. 経路探索のフレーム分散
+  //    1フレームあたり6msバジェットで処理を分散
+  //    人間（軽い）を先に、残り時間でゾンビ（重い）を処理
+  // ============================================================
+
+  /**
+   * 経路再計算スケジューラ
+   * 全エージェント一括ではなく、フレーム単位で時間バジェット内に収める
+   */
+  class PathScheduler {
+    /**
+     * @param {Map} adjacency 隣接リスト
+     * @param {Map} nodes ノード情報
+     * @param {number} budgetMs 1フレームあたりの時間バジェット（ミリ秒）
+     */
+    constructor(adjacency, nodes, budgetMs) {
+      this.adjacency = adjacency;
+      this.nodes = nodes;
+      this.budgetMs = budgetMs || 6;
+
+      // 再計算キュー（人間用・ゾンビ用を分離）
+      this._humanQueue = [];
+      this._zombieQueue = [];
+    }
+
+    /**
+     * 全エージェントの再計算リクエストをキューに追加
+     * 人間とゾンビを分離してキューイング
+     * @param {Array} agents エージェント配列
+     */
+    enqueueAll(agents) {
+      // 既存キューをクリアして新規に追加
+      this._humanQueue = [];
+      this._zombieQueue = [];
+
+      for (let i = 0; i < agents.length; i++) {
+        const agent = agents[i];
+        if (agent.isZombie) {
+          this._zombieQueue.push(agent);
+        } else {
+          this._humanQueue.push(agent);
+        }
+      }
+    }
+
+    /**
+     * 特定のエージェントを再計算キューに追加
+     * @param {Object} agent エージェント
+     */
+    enqueueAgent(agent) {
+      if (agent.isZombie) {
+        this._zombieQueue.push(agent);
+      } else {
+        this._humanQueue.push(agent);
+      }
+    }
+
+    /**
+     * キューに未処理のエージェントが残っているか
+     * @returns {boolean}
+     */
+    get hasPending() {
+      return this._humanQueue.length > 0 || this._zombieQueue.length > 0;
+    }
+
+    /**
+     * 1フレーム分の経路計算を実行
+     * 時間バジェット内で可能な限り処理する
+     * 人間（貪欲法、軽い）を先に処理し、残りでゾンビ（A*、重い）を処理
+     * @param {Array} agents 全エージェント配列（最寄りゾンビ検索用）
+     */
+    processFrame(agents) {
+      const startTime = performance.now();
+      const deadline = startTime + this.budgetMs;
+
+      // --- フェーズ1: 人間の経路計算（貪欲法、高速） ---
+      while (this._humanQueue.length > 0) {
+        if (performance.now() >= deadline) return;
+
+        const human = this._humanQueue.pop();
+
+        // 人間の現在位置を計算
+        const fromNode = this.nodes.get(human.from);
+        const toNode = this.nodes.get(human.to);
+        if (!fromNode || !toNode) continue;
+
+        const humanPos = {
+          lat: fromNode.lat + (toNode.lat - fromNode.lat) * human.progress,
+          lon: fromNode.lon + (toNode.lon - fromNode.lon) * human.progress,
+          cosLat: fromNode.cosLat + (toNode.cosLat - fromNode.cosLat) * human.progress,
+        };
+
+        // 最寄りのゾンビを探す
+        const nearestZombie = findNearestZombie(agents, humanPos, this.nodes);
+        if (!nearestZombie) continue;
+
+        // 逃走先を決定（現在のtoノードまたはfromノードから計算）
+        // エッジの端に近い方のノードから計算
+        const currentNodeId = human.progress >= 0.5 ? human.to : human.from;
+        const fleeTarget = humanFleeTarget(
+          this.adjacency,
+          this.nodes,
+          currentNodeId,
+          nearestZombie
+        );
+
+        if (fleeTarget !== null) {
+          // 逃走経路を設定（現在ノード→逃走先の2ノード経路）
+          human.path = [currentNodeId, fleeTarget];
+          human.pathIndex = 0;
+        }
+      }
+
+      // --- フェーズ2: ゾンビの経路計算（A*、重い） ---
+      while (this._zombieQueue.length > 0) {
+        if (performance.now() >= deadline) return;
+
+        const zombie = this._zombieQueue.pop();
+
+        // ゾンビの現在ノード（エッジの端に近い方）
+        const currentNodeId = zombie.progress >= 0.5 ? zombie.to : zombie.from;
+
+        // 最寄りの人間を探す
+        let bestDist = Infinity;
+        let bestTargetNodeId = null;
+
+        const zombieNode = this.nodes.get(currentNodeId);
+        if (!zombieNode) continue;
+
+        for (let i = 0; i < agents.length; i++) {
+          const target = agents[i];
+          if (target.isZombie) continue;
+
+          // 人間の補間位置を計算
+          const tFrom = this.nodes.get(target.from);
+          const tTo = this.nodes.get(target.to);
+          if (!tFrom || !tTo) continue;
+
+          const targetPos = {
+            lat: tFrom.lat + (tTo.lat - tFrom.lat) * target.progress,
+            lon: tFrom.lon + (tTo.lon - tFrom.lon) * target.progress,
+            cosLat: tFrom.cosLat + (tTo.cosLat - tFrom.cosLat) * target.progress,
+          };
+
+          const dist = equirectDist(zombieNode, targetPos);
+          if (dist < bestDist) {
+            bestDist = dist;
+            // 人間のエッジの端に近い方のノードをターゲットにする
+            bestTargetNodeId = target.progress >= 0.5 ? target.to : target.from;
+          }
+        }
+
+        if (bestTargetNodeId === null) continue;
+
+        // A*で経路を計算
+        const path = aStar(
+          this.adjacency,
+          this.nodes,
+          currentNodeId,
+          bestTargetNodeId
+        );
+
+        if (path.length > 0) {
+          zombie.path = path;
+          zombie.pathIndex = 0;
+        }
+      }
+    }
+  }
+
+  // ============================================================
+  // 公開API
+  // ============================================================
+  return {
+    PriorityQueue,
+    buildGraph,
+    aStar,
+    equirectDist,
+    haversine,
+    humanFleeTarget,
+    findNearestZombie,
+    PathScheduler,
+    // 定数
+    R,
+    DEG2RAD,
+  };
+})();
+</script>
+
+<!-- ========================================
+     シミュレーション統合・UIコントローラ
+     ======================================== -->
+<script>
+// ============================================================
+// アプリケーション — 状態管理とゲームループ
+// ============================================================
+const App = (() => {
+  'use strict';
+
+  // --- 状態オブジェクト ---
+  const config = { humanCount: 50, zombieCount: 3, speedMul: 1.0 };
+  const simState = {
+    graph: null,         // { nodes: Map, adjacency: Map }
+    agents: [],
+    scheduler: null,     // PathScheduler
+    running: false,
+    paused: false,
+    elapsed: 0,
+    lastTs: null,
+    animId: null,
+    pathTimer: 0,        // 経路再計算タイマー
+    lastSurvivorPulse: null, // ラストサバイバーのパルスinterval参照
+    lastSurvivorMarker: null, // ラストサバイバーの白円マーカー
+    history: [],             // 人口推移データ [{time, humans, zombies}]
+  };
+  const uiState = { phase: 'initial' }; // initial, loading, config, running, result
+
+  // --- Leafletオブジェクト ---
+  let map, markerLayer, roadLayer;
+
+  // ============================================================
+  // 初期化
+  // ============================================================
+  function init() {
+    map = L.map('map', { preferCanvas: true, zoomControl: true })
+      .setView([35.6812, 139.7671], 15);
+
+    L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/">CARTO</a>',
+      maxZoom: 19
+    }).addTo(map);
+
+    markerLayer = L.layerGroup().addTo(map);
+
+    // UIバインド
+    const elHC = document.getElementById('humanCount');
+    const elZC = document.getElementById('zombieCount');
+    const elSp = document.getElementById('speed');
+
+    elHC.addEventListener('input', () => {
+      config.humanCount = parseInt(elHC.value);
+      document.getElementById('humanCountVal').textContent = elHC.value;
+    });
+    elZC.addEventListener('input', () => {
+      config.zombieCount = parseInt(elZC.value);
+      document.getElementById('zombieCountVal').textContent = elZC.value;
+    });
+    elSp.addEventListener('input', () => {
+      config.speedMul = parseFloat(elSp.value);
+      document.getElementById('speedVal').textContent = parseFloat(elSp.value).toFixed(1);
+    });
+
+    document.getElementById('btnStart').addEventListener('click', startSim);
+    document.getElementById('btnPause').addEventListener('click', togglePause);
+    document.getElementById('btnReset').addEventListener('click', resetSim);
+    document.getElementById('btnRetry').addEventListener('click', startSim);
+    document.getElementById('btnNewArea').addEventListener('click', newArea);
+
+    // プリセットボタン
+    document.querySelectorAll('.btn-preset').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const h = parseInt(btn.dataset.human);
+        const z = parseInt(btn.dataset.zombie);
+        config.humanCount = h;
+        config.zombieCount = z;
+        const elHC = document.getElementById('humanCount');
+        const elZC = document.getElementById('zombieCount');
+        elHC.value = h;
+        elZC.value = z;
+        document.getElementById('humanCountVal').textContent = h;
+        document.getElementById('zombieCountVal').textContent = z;
+      });
+    });
+
+    // キーボードショートカット
+    document.addEventListener('keydown', (e) => {
+      // テキスト入力中は無視
+      if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+
+      switch (e.code) {
+        case 'Space':
+          if (simState.running) { e.preventDefault(); togglePause(); }
+          break;
+        case 'KeyR':
+          if (simState.running) { resetSim(); }
+          break;
+        case 'Enter':
+          if (uiState.phase === 'config') { e.preventDefault(); startSim(); }
+          break;
+        case 'Escape':
+          if (uiState.phase === 'running') { resetSim(); }
+          else if (uiState.phase === 'config') { newArea(); }
+          else if (uiState.phase === 'result') { newArea(); }
+          break;
+      }
+    });
+
+    // マップクリック → エリア選択
+    map.on('click', onMapClick);
+  }
+
+  // ============================================================
+  // マップクリック → 道路データ取得
+  // ============================================================
+  async function onMapClick(e) {
+    if (simState.running) return;
+    const { lat, lng } = e.latlng;
+
+    setPhase('loading');
+    try {
+      const elements = await OverpassAPI.fetchRoads(lat, lng);
+      const graph = ZombieSim.buildGraph({ elements });
+
+      if (graph.nodes.size < 10) {
+        alert('この場所には十分な道路データがありません。別の場所を選んでください。');
+        setPhase('initial');
+        return;
+      }
+
+      simState.graph = graph;
+      console.info(`[Graph] ノード: ${graph.nodes.size}, エッジ: ${graph.adjacency.size}`);
+
+      drawRoads();
+      const allCoords = [];
+      graph.nodes.forEach(n => allCoords.push([n.lat, n.lon]));
+      if (allCoords.length > 0) map.fitBounds(L.latLngBounds(allCoords).pad(0.1));
+
+      setPhase('config');
+    } catch (err) {
+      alert('道路データの取得に失敗しました:\n' + err.message);
+      setPhase('initial');
+    }
+  }
+
+  // ============================================================
+  // 道路描画
+  // ============================================================
+  function drawRoads() {
+    if (roadLayer) map.removeLayer(roadLayer);
+    const lines = [];
+    const visited = new Set();
+    const { nodes, adjacency } = simState.graph;
+
+    adjacency.forEach((edges, fromId) => {
+      const fromNode = nodes.get(fromId);
+      if (!fromNode) return;
+      for (const edge of edges) {
+        const key = fromId < edge.to ? `${fromId}-${edge.to}` : `${edge.to}-${fromId}`;
+        if (visited.has(key)) continue;
+        visited.add(key);
+        const toNode = nodes.get(edge.to);
+        if (!toNode) continue;
+        lines.push([[fromNode.lat, fromNode.lon], [toNode.lat, toNode.lon]]);
+      }
+    });
+
+    roadLayer = L.layerGroup(
+      lines.map(c => L.polyline(c, { color: '#333366', weight: 2, opacity: 0.6 }))
+    ).addTo(map);
+  }
+
+  // ============================================================
+  // エージェント作成
+  // ============================================================
+  function createAgents() {
+    simState.agents = [];
+    markerLayer.clearLayers();
+
+    const { nodes, adjacency } = simState.graph;
+    const nodeIds = Array.from(adjacency.keys());
+    const total = config.humanCount + config.zombieCount;
+
+    for (let i = 0; i < total; i++) {
+      const isZombie = i < config.zombieCount;
+      const nodeId = nodeIds[Math.floor(Math.random() * nodeIds.length)];
+      const neighbors = adjacency.get(nodeId);
+      if (!neighbors || neighbors.length === 0) continue;
+      const edge = neighbors[Math.floor(Math.random() * neighbors.length)];
+      const progress = Math.random();
+
+      const agent = {
+        isZombie,
+        from: nodeId,
+        to: edge.to,
+        progress,
+        edgeDist: edge.dist,
+        speed: isZombie ? 1.2 : 1.8,
+        path: [],
+        pathIndex: 0,
+        marker: null,
+      };
+
+      const pos = getAgentPos(agent);
+      agent.marker = L.circleMarker([pos.lat, pos.lon], {
+        radius: isZombie ? 5 : 4,
+        color: isZombie ? '#e94560' : '#00d2ff',
+        fillColor: isZombie ? '#e94560' : '#00d2ff',
+        fillOpacity: 0.9,
+        weight: 0,
+      }).addTo(markerLayer);
+
+      simState.agents.push(agent);
+    }
+  }
+
+  function getAgentPos(agent) {
+    const { nodes } = simState.graph;
+    const a = nodes.get(agent.from);
+    const b = nodes.get(agent.to);
+    if (!a || !b) return { lat: 0, lon: 0, cosLat: 1 };
+    return {
+      lat: a.lat + (b.lat - a.lat) * agent.progress,
+      lon: a.lon + (b.lon - a.lon) * agent.progress,
+      cosLat: a.cosLat + (b.cosLat - a.cosLat) * agent.progress,
+    };
+  }
+
+  // ============================================================
+  // シミュレーション制御
+  // ============================================================
+  function startSim() {
+    document.getElementById('result').classList.add('hidden');
+    createAgents();
+
+    const { adjacency, nodes } = simState.graph;
+    simState.scheduler = new ZombieSim.PathScheduler(adjacency, nodes, 6);
+    simState.scheduler.enqueueAll(simState.agents);
+
+    simState.running = true;
+    simState.paused = false;
+    simState.elapsed = 0;
+    simState.lastTs = null;
+    simState.pathTimer = 0;
+    simState.history = [];
+
+    setPhase('running');
+    updateStats();
+    simState.animId = requestAnimationFrame(tick);
+  }
+
+  function togglePause() {
+    simState.paused = !simState.paused;
+    document.getElementById('btnPause').textContent = simState.paused ? '再開' : '一時停止';
+    if (!simState.paused) simState.lastTs = null;
+  }
+
+  function resetSim() {
+    simState.running = false;
+    simState.paused = false;
+    if (simState.animId) cancelAnimationFrame(simState.animId);
+    cleanupLastSurvivor();
+    document.getElementById('stats').style.background = '';
+    document.getElementById('humanStat').classList.remove('blink-warning');
+    markerLayer.clearLayers();
+    simState.agents = [];
+    setPhase('config');
+  }
+
+  function newArea() {
+    simState.running = false;
+    if (simState.animId) cancelAnimationFrame(simState.animId);
+    cleanupLastSurvivor();
+    document.getElementById('stats').style.background = '';
+    document.getElementById('humanStat').classList.remove('blink-warning');
+    markerLayer.clearLayers();
+    if (roadLayer) map.removeLayer(roadLayer);
+    simState.agents = [];
+    simState.graph = null;
+    setPhase('initial');
+  }
+
+  // ============================================================
+  // ゲームループ
+  // ============================================================
+  function tick(ts) {
+    if (!simState.running) return;
+
+    if (simState.paused) {
+      simState.animId = requestAnimationFrame(tick);
+      return;
+    }
+
+    if (!simState.lastTs) simState.lastTs = ts;
+    const dt = Math.min((ts - simState.lastTs) / 1000, 0.1); // 秒、上限0.1s
+    simState.lastTs = ts;
+    simState.elapsed += dt;
+
+    // 経路再計算（0.5秒ごとにキューイング）
+    simState.pathTimer += dt;
+    if (simState.pathTimer >= 0.5) {
+      simState.pathTimer = 0;
+      simState.scheduler.enqueueAll(simState.agents);
+
+      // 人口推移データ記録（0.5秒ごと）
+      const h = simState.agents.filter(a => !a.isZombie).length;
+      const z = simState.agents.filter(a => a.isZombie).length;
+      simState.history.push({ time: simState.elapsed, humans: h, zombies: z });
+      drawMiniGraph(document.getElementById('miniGraph'), simState.history);
+    }
+    // フレーム分散で経路計算
+    simState.scheduler.processFrame(simState.agents);
+
+    moveAgents(dt);
+    checkInfections();
+    updateMarkers();
+    updateStats();
+
+    // 終了判定
+    const humanCount = simState.agents.filter(a => !a.isZombie).length;
+    if (humanCount === 0) {
+      simState.running = false;
+      showResult();
+      return;
+    }
+
+    simState.animId = requestAnimationFrame(tick);
+  }
+
+  // ============================================================
+  // 移動処理
+  // ============================================================
+  function moveAgents(dt) {
+    const { adjacency, nodes } = simState.graph;
+    const moveTime = dt * config.speedMul;
+
+    for (const agent of simState.agents) {
+      const moveDist = agent.speed * moveTime;
+      agent.progress += moveDist / Math.max(agent.edgeDist, 0.1);
+
+      if (agent.progress >= 1.0) {
+        const arrivedNode = agent.to;
+        let nextNode = null;
+
+        // 経路から次のノードを取得
+        if (agent.path.length > 0) {
+          const idx = agent.path.indexOf(arrivedNode);
+          if (idx >= 0 && idx < agent.path.length - 1) {
+            nextNode = agent.path[idx + 1];
+          }
+        }
+
+        // 経路がない場合はランダムに選択
+        if (nextNode == null) {
+          const neighbors = adjacency.get(arrivedNode);
+          if (neighbors && neighbors.length > 0) {
+            const pick = neighbors[Math.floor(Math.random() * neighbors.length)];
+            nextNode = pick.to;
+          }
+        }
+
+        if (nextNode != null && nodes.has(nextNode)) {
+          const neighbors = adjacency.get(arrivedNode) || [];
+          const edge = neighbors.find(e => e.to === nextNode);
+          agent.from = arrivedNode;
+          agent.to = nextNode;
+          agent.progress = 0;
+          agent.edgeDist = edge ? edge.dist : 10;
+        } else {
+          agent.progress = 1.0;
+        }
+      }
+    }
+  }
+
+  // ============================================================
+  // 感染判定
+  // ============================================================
+  function checkInfections() {
+    const { nodes } = simState.graph;
+    const THRESHOLD = 8; // メートル
+    const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+    for (const human of simState.agents) {
+      if (human.isZombie) continue;
+      const hPos = getAgentPos(human);
+
+      for (const zombie of simState.agents) {
+        if (!zombie.isZombie) continue;
+        const zPos = getAgentPos(zombie);
+        const dist = ZombieSim.equirectDist(hPos, zPos);
+
+        if (dist < THRESHOLD) {
+          human.isZombie = true;
+          human.speed = 1.2;
+          human.path = [];
+          human.marker.setStyle({
+            radius: 5, color: '#e94560', fillColor: '#e94560',
+          });
+
+          if (!reducedMotion) {
+            // 感染パルスエフェクト: 感染地点に拡大フェードアウトする円
+            const pulseMarker = L.circleMarker([hPos.lat, hPos.lon], {
+              radius: 6, color: '#ffd93d', fillColor: '#ffd93d',
+              fillOpacity: 0.7, weight: 1, opacity: 0.8,
+            }).addTo(markerLayer);
+            let pulseStart = performance.now();
+            const PULSE_DURATION = 300;
+            function animatePulse(now) {
+              const elapsed = now - pulseStart;
+              const t = Math.min(elapsed / PULSE_DURATION, 1);
+              const radius = 6 + (20 - 6) * t;
+              const opacity = 0.7 * (1 - t);
+              pulseMarker.setRadius(radius);
+              pulseMarker.setStyle({ fillOpacity: opacity, opacity: opacity });
+              if (t < 1) {
+                requestAnimationFrame(animatePulse);
+              } else {
+                markerLayer.removeLayer(pulseMarker);
+              }
+            }
+            requestAnimationFrame(animatePulse);
+
+            // 新生ゾンビパルス: radius 5→8→5 を2回 (0.5秒)
+            let zombiePulseCount = 0;
+            const ZOMBIE_PULSE_INTERVAL = 125; // 0.5秒 / 4ステップ
+            const zombiePulseTimer = setInterval(() => {
+              if (!human.marker) { clearInterval(zombiePulseTimer); return; }
+              zombiePulseCount++;
+              if (zombiePulseCount % 2 === 1) {
+                human.marker.setRadius(8);
+              } else {
+                human.marker.setRadius(5);
+              }
+              if (zombiePulseCount >= 4) {
+                clearInterval(zombiePulseTimer);
+                if (human.marker) human.marker.setRadius(5);
+              }
+            }, ZOMBIE_PULSE_INTERVAL);
+          }
+
+          break;
+        }
+      }
+    }
+  }
+
+  // ============================================================
+  // 描画更新
+  // ============================================================
+  function updateMarkers() {
+    for (const agent of simState.agents) {
+      const pos = getAgentPos(agent);
+      agent.marker.setLatLng([pos.lat, pos.lon]);
+    }
+  }
+
+  function drawMiniGraph(canvas, history) {
+    if (!canvas || history.length < 2) return;
+    const ctx = canvas.getContext('2d');
+    const w = canvas.width;
+    const h = canvas.height;
+
+    ctx.clearRect(0, 0, w, h);
+
+    const total = history[0].humans + history[0].zombies;
+    if (total === 0) return;
+
+    const stepX = w / (history.length - 1);
+
+    // 人間エリア（青、下から）
+    ctx.beginPath();
+    ctx.moveTo(0, h);
+    for (let i = 0; i < history.length; i++) {
+      const x = i * stepX;
+      const humanH = (history[i].humans / total) * h;
+      ctx.lineTo(x, h - humanH);
+    }
+    ctx.lineTo((history.length - 1) * stepX, h);
+    ctx.closePath();
+    ctx.fillStyle = 'rgba(0, 210, 255, 0.5)';
+    ctx.fill();
+
+    // ゾンビエリア（赤、上から）
+    ctx.beginPath();
+    ctx.moveTo(0, 0);
+    for (let i = 0; i < history.length; i++) {
+      const x = i * stepX;
+      const zombieH = (history[i].zombies / total) * h;
+      ctx.lineTo(x, zombieH);
+    }
+    ctx.lineTo((history.length - 1) * stepX, 0);
+    ctx.closePath();
+    ctx.fillStyle = 'rgba(233, 69, 96, 0.5)';
+    ctx.fill();
+  }
+
+  function cleanupLastSurvivor() {
+    if (simState.lastSurvivorPulse) {
+      clearInterval(simState.lastSurvivorPulse);
+      simState.lastSurvivorPulse = null;
+    }
+    if (simState.lastSurvivorMarker) {
+      markerLayer.removeLayer(simState.lastSurvivorMarker);
+      simState.lastSurvivorMarker = null;
+    }
+  }
+
+  function updateStats() {
+    const humans = simState.agents.filter(a => !a.isZombie).length;
+    const zombies = simState.agents.filter(a => a.isZombie).length;
+    const total = humans + zombies;
+    const sec = Math.floor(simState.elapsed);
+    const min = Math.floor(sec / 60);
+    const s = sec % 60;
+
+    const humanStatEl = document.getElementById('humanStat');
+    const statsEl = document.getElementById('stats');
+    humanStatEl.textContent = humans;
+    document.getElementById('zombieStat').textContent = zombies;
+    document.getElementById('timeStat').textContent = `${min}:${String(s).padStart(2, '0')}`;
+
+    // 比率バー更新
+    const pct = total > 0 ? (humans / total) * 100 : 0;
+    document.getElementById('ratioBarHuman').style.width = pct + '%';
+
+    // --- ラストサバイバー演出 ---
+    const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+    // 残り10人以下: stats背景を赤味がかった色に
+    if (humans <= 10 && humans > 0) {
+      statsEl.style.background = 'rgba(60, 20, 20, 0.92)';
+    } else {
+      statsEl.style.background = '';
+    }
+
+    // 残り5人以下: humanStatを白色で点滅
+    if (humans <= 5 && humans > 0 && !reducedMotion) {
+      humanStatEl.classList.add('blink-warning');
+    } else {
+      humanStatEl.classList.remove('blink-warning');
+    }
+
+    // 残り1人: ラストサバイバーに白い円パルス
+    if (humans === 1 && !reducedMotion) {
+      const lastHuman = simState.agents.find(a => !a.isZombie);
+      if (lastHuman && !simState.lastSurvivorPulse) {
+        const pos = getAgentPos(lastHuman);
+        simState.lastSurvivorMarker = L.circleMarker([pos.lat, pos.lon], {
+          radius: 6, color: '#ffffff', fillColor: '#ffffff',
+          fillOpacity: 0.5, weight: 1, opacity: 0.7,
+        }).addTo(markerLayer);
+        let growing = true;
+        simState.lastSurvivorPulse = setInterval(() => {
+          if (!lastHuman || lastHuman.isZombie) {
+            cleanupLastSurvivor();
+            return;
+          }
+          const p = getAgentPos(lastHuman);
+          simState.lastSurvivorMarker.setLatLng([p.lat, p.lon]);
+          const curR = simState.lastSurvivorMarker.getRadius();
+          if (growing) {
+            simState.lastSurvivorMarker.setRadius(curR + 1);
+            if (curR >= 14) growing = false;
+          } else {
+            simState.lastSurvivorMarker.setRadius(curR - 1);
+            if (curR <= 6) growing = true;
+          }
+        }, 50);
+      }
+    } else if (humans !== 1) {
+      cleanupLastSurvivor();
+    }
+  }
+
+  // ============================================================
+  // 結果表示
+  // ============================================================
+  function showResult() {
+    // ラストサバイバー演出クリーンアップ
+    cleanupLastSurvivor();
+    document.getElementById('stats').style.background = '';
+    document.getElementById('humanStat').classList.remove('blink-warning');
+
+    const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    const sec = Math.floor(simState.elapsed);
+    const min = Math.floor(sec / 60);
+    const s = sec % 60;
+    document.getElementById('resultTime').textContent =
+      `経過時間: ${min}:${String(s).padStart(2, '0')}`;
+    document.getElementById('resultCount').textContent =
+      `初期人間: ${config.humanCount}人 / 初期ゾンビ: ${config.zombieCount}体`;
+    document.getElementById('btnPause').classList.add('hidden');
+
+    // 最終データポイントを追加（全員ゾンビ化）
+    const totalAgents = simState.agents.length;
+    simState.history.push({ time: simState.elapsed, humans: 0, zombies: totalAgents });
+
+    // 終了フラッシュ演出
+    const flashEl = document.getElementById('flash');
+    const resultEl = document.getElementById('result');
+
+    if (!reducedMotion) {
+      // フラッシュ表示
+      flashEl.classList.add('active');
+      flashEl.addEventListener('animationend', () => {
+        flashEl.classList.remove('active');
+      }, { once: true });
+
+      // 1秒後にリザルトフェードイン
+      setTimeout(() => {
+        resultEl.classList.remove('hidden');
+        resultEl.classList.add('fade-in');
+        resultEl.addEventListener('animationend', () => {
+          resultEl.classList.remove('fade-in');
+        }, { once: true });
+        // リザルト画面に拡大版グラフ描画
+        drawMiniGraph(document.getElementById('resultGraph'), simState.history);
+      }, 1000);
+    } else {
+      resultEl.classList.remove('hidden');
+      // リザルト画面に拡大版グラフ描画
+      drawMiniGraph(document.getElementById('resultGraph'), simState.history);
+    }
+  }
+
+  // ============================================================
+  // UI画面状態管理
+  // ============================================================
+  function setPhase(phase) {
+    uiState.phase = phase;
+    document.getElementById('instruction').classList.toggle('hidden', phase !== 'initial');
+    document.getElementById('loading').classList.toggle('hidden', phase !== 'loading');
+    document.getElementById('controls').classList.toggle('hidden', phase !== 'config' && phase !== 'running');
+    document.getElementById('stats').classList.toggle('hidden', phase !== 'running');
+    document.getElementById('result').classList.add('hidden');
+
+    const btnStart = document.getElementById('btnStart');
+    const btnPause = document.getElementById('btnPause');
+    const btnReset = document.getElementById('btnReset');
+
+    if (phase === 'config') {
+      btnStart.classList.remove('hidden');
+      btnPause.classList.add('hidden');
+      btnReset.classList.add('hidden');
+      btnPause.textContent = '一時停止';
+    } else if (phase === 'running') {
+      btnStart.classList.add('hidden');
+      btnPause.classList.remove('hidden');
+      btnReset.classList.remove('hidden');
+    }
+  }
+
+  // --- デバッグ用公開 ---
+  window.debugState = { simState, config, uiState };
+
+  return { init };
+})();
+
+// アプリ起動
+(async function() {
+  if (_leafletFallbackPromise) await _leafletFallbackPromise;
+  App.init();
+})();
+</script>
+</body>
+</html>
